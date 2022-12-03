@@ -2,12 +2,16 @@ const express = require('express');
 const morgan = require('morgan');
 const app = express();
 
-const tourRouter = require('./routes/tourRoutes')
-const userRouter = require('./routes/userRoutes')
+const tourRouter = require('./routes/tourRoutes');
+const userRouter = require('./routes/userRoutes');
+
+console.log(process.env.NODE_ENV);
 
 // global middlewares
-app.use(morgan('combined'));
+if (process.env.NODE_ENV === 'development') app.use(morgan('combined'));
+
 app.use(express.json());
+app.use(express.static(`${__dirname}/public`));
 app.use((req, res, next) => {
   console.log('Hello from the middleware 👋');
   next();
