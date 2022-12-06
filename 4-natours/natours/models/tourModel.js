@@ -1,4 +1,4 @@
-const moongose = require('mongoose');
+const mongoose = require('mongoose');
 
 const tourSchema = new mongoose.Schema({
   name: {
@@ -18,3 +18,4 @@ const tourSchema = new mongoose.Schema({
 
 // Convention: Capitalize first letter of model name
 const Tour = mongoose.model('Tour', tourSchema);
+module.exports = Tour;

@@ -1,90 +1,107 @@
 // middleware functions related to tours
-const fs = require('fs');
+const Tour = require('../models/tourModel');
 
-const toursPath = `${__dirname}/../dev-data/data/tours-simple.json`;
-const tours = JSON.parse(fs.readFileSync(toursPath, 'utf-8'));
-
-// function to be exported to be used as param middleware function
-exports.checkId = (req, res, next, val) => {
-  console.log(`Tour id is: ${val}`);
-  const id = +val;
-  const tour = tours.find((el) => el.id === id);
-  if (!tour) {
-    return res.status(404).json({
+exports.getAllTours = async (req, res) => {
+  try {
+    const tours = await Tour.find(); // like in mongo shell, not specifying a filter returns all documents
+    res.status(200).json({
+      status: 'success',
+      results: tours.length,
+      data: {
+        tours,
+      },
+    });
+  } catch (err) {
+    res.status(404).json({
       status: 'fail',
-      message: 'Resource not found',
+      message: err,
     });
   }
-  next();
 };
 
-exports.checkBody = (req, res, next) => {
-  if (!req.body.name || !req.body.price) {
-    return res.status(400).json({
+exports.getTour = async (req, res) => {
+  try {
+    // similar to Tour.findOne({ _id: req.params.id })
+    const tour = await Tour.findById(
+      // we expect to receive a tour id from the url
+      req.params.id
+    );
+    res.status(200).json({
+      status: 'success',
+      data: {
+        tour,
+      },
+    });
+  } catch (err) {
+    res.status(404).json({
       status: 'fail',
-      message: 'Missing name or price',
+      message: err,
     });
   }
-  next();
 };
 
-// middleware functions that send a response don't need to call next()
-exports.getAllTours = (req, res) => {
-  console.log(req.requestTime);
-  res.status(200).json({
-    status: 'success',
-    requestedAt: req.requestTime,
-    results: tours.length,
-    data: {
-      tours,
-    },
-  });
-};
+exports.createTour = async (req, res) => {
+  // instead of calling a method (.save) in the document (Model instance)...
+  // const newTour = new Tour({});
+  // newTour.save();
 
-// requires param middleware to be executed first
-exports.getTour = (req, res) => {
-  // here the param id in the request is allowed
-  // because of the param middleware's check
-  // so we can dispose of some validation code
-  const id = +req.params.id;
-  const tour = tours.find((el) => el.id === id);
-  res.status(200).json({
-    status: 'success',
-    data: {
-      tour,
-    },
-  });
-};
-
-exports.createTour = (req, res) => {
-  const newId = tours[tours.length - 1].id + 1;
-  const newTour = Object.assign({ id: newId }, req.body);
-  tours.push(newTour);
-
-  fs.writeFile(toursPath, JSON.stringify(tours), (err) => {
+  // We call a method on the model (Model class)
+  // use
+  try {
+    // bare in mind that only keys defined in the schema will be saved in newTour
+    const newTour = await Tour.create(req.body);
     res.status(201).json({
+      // 201: created
       status: 'success',
       data: {
         tour: newTour,
       },
     });
-  });
+  } catch (err) {
+    console.log(err);
+    res.status(400).json({
+      status: 'fail',
+      // error handling later in the course
+      message: 'Invalid data sent!',
+    });
+  }
 };
 
-// requires param middleware to be executed first
-exports.updateTour = (req, res) => {
-  res.status(200).json({
-    status: 'success',
-    data: {
-      tour: '<Updated tour here...>',
-    },
-  });
+exports.updateTour = async (req, res) => {
+  try {
+    // all these model methods actually returns mongoose Query objects (instances)
+    // findAndUpdate only updates fields that differ from the original
+    const tour = await Tour.findByIdAndUpdate(req.params.id, req.body, {
+      new: true, // return the updated document
+      runValidators: true, // run schema validators on update
+    });
+    res.status(200).json({
+      status: 'success',
+      data: {
+        tour,
+      },
+    });
+  } catch (err) {
+    // mongoose executes type casting to the req.body values
+    // that's why setting "price" to "500" will work but to "hello" won't
+    res.status(404).json({
+      status: 'fail',
+      message: err,
+    });
+  }
 };
 
-// requires param middleware to be executed first
-exports.deleteTour = (req, res) => {
-  res.status(204).json({
-    status: 'success',
-    data: null,
-  });
+exports.deleteTour = async (req, res) => {
+  try {
+    await Tour.findByIdAndDelete(req.params.id);
+    res.status(204).json({
+      status: 'success',
+      data: null,
+    });
+  } catch (err) {
+    res.status(404).json({
+      status: 'fail',
+      message: err,
+    });
+  }
 };
