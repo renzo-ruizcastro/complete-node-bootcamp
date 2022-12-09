@@ -1,8 +1,8 @@
 // middleware functions related to tours
 const Tour = require('../models/tourModel');
 
-const validateQueryParams = (allowedQueryParams, paramsPassed) => {
-  const params = Object.keys(paramsPassed);
+const validateQuery = (queryObj, allowedQueryParams) => {
+  const params = Object.keys(queryObj);
   const isValid = params.every((param) => allowedQueryParams.includes(param));
   return isValid;
 };
@@ -20,6 +20,7 @@ const formatFilteringQueryOperations = (
   filteringQueryObj,
   filteringQueryOperations
 ) => {
+  // stringifying the query object to be able to use the replace method to add the $ sign to the operators to match the mongo shell syntax
   let queryStr = JSON.stringify(filteringQueryObj);
   const operatorsRegex = new RegExp(
     `\\b(${filteringQueryOperations.join('|')})\\b`,
@@ -27,6 +28,17 @@ const formatFilteringQueryOperations = (
   );
   queryStr = queryStr.replace(operatorsRegex, (match) => `$${match}`);
   return JSON.parse(queryStr);
+};
+
+// middleware function to alias the top 5 cheap tours
+// after it is called, the getAllTours function is called
+exports.aliasTopTours = (req, res, next) => {
+  // prefilling the query object with the values we want
+  req.query.limit = '5'; // object values are always strings
+  req.query.sort = '-ratingsAverage,price';
+  req.query.fields = 'name,price,ratingsAverage,summary,difficulty';
+  next();
+  // request object is mutated and passed to getAllTours
 };
 
 exports.getAllTours = async (req, res) => {
@@ -45,7 +57,7 @@ exports.getAllTours = async (req, res) => {
 
     // BUILDING QUERY
     if (Object.keys(queryObj).length > 0) {
-      if (!validateQueryParams(allowedQueryParams.flat(), queryObj))
+      if (!validateQuery(queryObj, allowedQueryParams.flat()))
         throw new Error('Invalid query params');
       // since the queryObj object is similar to the filtering object in mongo shell we will use it to filter
 
@@ -63,7 +75,7 @@ exports.getAllTours = async (req, res) => {
       //   .where('difficulty')
       //   .equals('easy'); // second way to filter (mongoose way)
 
-      // const tours = await Tour.find(); // like in mongo shell, not specifying a filter returns all documents
+      // query = Tour.find(); // like in mongo shell, not specifying a filter returns all documents
 
       // ADVANCED FILTERING
       // query includes fields, operators and values
@@ -71,17 +83,6 @@ exports.getAllTours = async (req, res) => {
       // req query: { duration: { gte: '5' }, difficulty: 'easy' }
       // mongosh query: .find({ duration: { $gte: 5 }, difficulty: 'easy' })
       // mongoose query: .find({ duration: { $gte: '5' }, difficulty: 'easy' })
-
-      // // stringifying the query object to be able to use the replace method to add the $ sign to the operators to match the mongo shell syntax
-      // let queryStr = JSON.stringify(queryObj);
-      // // this advanced filtering already includes the basic filtering and other params like sort if no operators are specified
-      // queryStr = queryStr.replace(
-      //   // you can specify more operator
-      //   /\b(gte|gt|lte|lt)\b/g,
-      //   (match) => `$${match}`
-      // );
-      // // converting the stringified query object back to an object
-      // query = Tour.find(JSON.parse(queryStr)); // .find() returns actually a query object
 
       const filteringQuery = getFilteringQuery(queryObj, allowedQueryParams[0]);
       console.log('Filtering query:', filteringQuery);
@@ -110,6 +111,7 @@ exports.getAllTours = async (req, res) => {
         // sorting goes from left to right
       } else {
         // default sorting
+        // if you're going to sort by a field, this must be returned in the query in which you will sort
         query = query.sort('-createdAt');
       }
       // we remove await here because we may want to add more query methods later
@@ -130,6 +132,19 @@ exports.getAllTours = async (req, res) => {
         // prefixing a field with a - means that we don't want to show it, all other fields will be shown
       }
 
+      // LIMITING
+      // url query: ?limit=10
+      // req query: { limit: '10' }
+      // mongosh query: .find().limit(10)
+      // mongoose query object: .find().limit(10)
+
+      // avoid problems with pagination
+      if (queryObj.limit && !queryObj.page) {
+        if (!Number.isInteger(+queryObj.limit) || queryObj.limit < 1)
+          throw new Error('Limit must be an integer greater than 0');
+        query = query.limit(+queryObj.limit);
+      }
+
       // PAGINATION
       // page=2&limit=10, 1-10 page 1, 11-20 page 2, 21-30 page 3...
       // url query: ?page=2&limit=10
@@ -138,9 +153,19 @@ exports.getAllTours = async (req, res) => {
       // mongoose query object: .find().skip(10).limit(10)
 
       if (queryObj.page && queryObj.limit) {
+        // must be int
+        if (
+          !Number.isInteger(+queryObj.page) ||
+          !Number.isInteger(+queryObj.limit) ||
+          queryObj.page < 1 ||
+          queryObj.limit < 1
+        )
+          throw new Error('Page and limit must be integers greater than 0');
         const skip = (queryObj.page - 1) * queryObj.limit;
         const limit = +queryObj.limit;
         console.log('skip:', skip, 'limit:', limit);
+        const numTours = await Tour.countDocuments();
+        if (skip >= numTours) throw new Error('This page does not exist');
         query = query.skip(skip).limit(limit);
       }
       // if not specified, we will show all documents
@@ -149,6 +174,7 @@ exports.getAllTours = async (req, res) => {
     }
 
     // EXECUTING QUERY
+    // using exec for promises: https://mongoosejs.com/docs/promises.html
     const tours = await query.exec();
 
     res.status(200).json({
