@@ -1,20 +1,20 @@
 // middleware functions related to tours
 const Tour = require('../models/tourModel');
 
-const validateQuery = (queryObj, allowedQueryParams) => {
-  const params = Object.keys(queryObj);
-  const isValid = params.every((param) => allowedQueryParams.includes(param));
-  return isValid;
-};
+// const validateQuery = (queryObj, allowedQueryParams) => {
+//   const params = Object.keys(queryObj);
+//   const isValid = params.every((param) => allowedQueryParams.includes(param));
+//   return isValid;
+// };
 
-const getFilteringQuery = (queryObj, allowedFilteringParams) => {
-  const filteringQuery = {};
-  Object.keys(queryObj).forEach((param) => {
-    if (allowedFilteringParams.includes(param))
-      filteringQuery[param] = queryObj[param];
-  });
-  return filteringQuery;
-};
+// const getFilteringQuery = (queryObj, allowedFilteringParams) => {
+//   const filteringQuery = {};
+//   Object.keys(queryObj).forEach((param) => {
+//     if (allowedFilteringParams.includes(param))
+//       filteringQuery[param] = queryObj[param];
+//   });
+//   return filteringQuery;
+// };
 
 const formatFilteringQueryOperations = (
   filteringQueryObj,
@@ -41,17 +41,101 @@ exports.aliasTopTours = (req, res, next) => {
   // request object is mutated and passed to getAllTours
 };
 
+class APIQuery {
+  constructor(query, reqQuery) {
+    this.query = query;
+    this.reqQuery = reqQuery;
+  }
+
+  static allowedQueryParams = [
+    ['duration', 'difficulty', 'price'], // filtering
+    'sort', // sorting
+    'fields', // field limiting
+    'page', // pagination
+    'limit', // pagination
+  ];
+  static allowedFilteringQueryOperations = ['gt', 'gte', 'lt', 'lte'];
+
+  validate() {
+    const params = Object.keys(this.reqQuery);
+    const isValid = params.every((param) =>
+      this.allowedQueryParams.flat().includes(param)
+    );
+    return isValid;
+  }
+
+  find() {
+    const filteringQuery = {};
+    Object.keys(this.reqQuery).forEach((param) => {
+      if (this.allowedQueryParams[0].includes(param))
+        filteringQuery[param] = this.reqQuery[param];
+    });
+    let queryStr = JSON.stringify(filteringQuery);
+    const operatorsRegex = new RegExp(
+      `\\b(${this.allowedFilteringQueryOperations.join('|')})\\b`,
+      `g`
+    );
+    queryStr = queryStr.replace(operatorsRegex, (match) => `$${match}`);
+    this.query = this.query.find(JSON.parse(queryStr));
+    return this;
+  }
+
+  sort() {
+    if (this.reqQuery.sort) {
+      const sortBy = this.reqQuery.sort.split(',').join(' ');
+      this.query = this.query.sort(sortBy);
+    } else {
+      this.query = this.query.sort('-createdAt');
+    }
+    return this;
+  }
+
+  select() {
+    if (this.reqQuery.fields) {
+      const fields = this.reqQuery.fields.split(',').join(' ');
+      this.query = this.query.select(fields);
+    } else {
+      this.query = this.query.select('-__v');
+    }
+    return this;
+  }
+
+  limit() {
+    if (this.reqQuery.limit && !this.reqQuery.page) {
+      if (!Number.isInteger(+this.reqQuery.limit) || +this.reqQuery.limit < 1)
+        throw new Error('Limit must be an integer greater than 0');
+      this.query = this.query.limit(+this.query.limit);
+    }
+    return this;
+  }
+
+  paginate() {
+    if (this.reqQuery.page && this.reqQuery.limit) {
+      if (
+        !Number.isInteger(+this.reqQuery.page) ||
+        !Number.isInteger(+this.reqQuery.limit) ||
+        +this.reqQuery.page < 1 ||
+        +this.reqQuery.limit < 1
+      )
+        throw new Error('Page and limit must be integers greater than 0');
+      const skip = (+this.reqQuery.page - 1) * +this.reqQuery.limit;
+      this.query = this.query.skip(skip).limit(+this.reqQuery.limit);
+    }
+    return this;
+  }
+}
+
 exports.getAllTours = async (req, res) => {
   try {
     console.log('Query:', req.query);
     const queryObj = { ...req.query };
-    const allowedQueryParams = [
-      ['duration', 'difficulty', 'price'], // filtering
-      'sort', // sorting
-      'fields', // field limiting
-      'page', // pagination
-      'limit', // pagination
-    ];
+    // const allowedQueryParams = [
+    //   ['duration', 'difficulty', 'price'], // filtering
+    //   'sort', // sorting
+    //   'fields', // field limiting
+    //   'page', // pagination
+    //   'limit', // pagination
+    // ];
 
     let query;
 
